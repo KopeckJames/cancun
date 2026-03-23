@@ -3,6 +3,8 @@ import path from "path";
 import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
+import { put } from "@vercel/blob";
+import { sql } from "@vercel/postgres";
 
 // Configure ffmpeg path
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
@@ -17,104 +19,115 @@ export interface MediaMetadata {
   height?: number;
 }
 
-const DB_PATH = path.join(process.cwd(), "public", "db.json");
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 const TMP_DIR = path.join(process.cwd(), "public", "tmp");
 
 async function init() {
   try {
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
     await fs.mkdir(TMP_DIR, { recursive: true });
   } catch (e) {
-    // Ignore
-  }
-  
-  try {
-    await fs.access(DB_PATH);
-  } catch (e) {
-    await fs.writeFile(DB_PATH, JSON.stringify([]), "utf-8");
+    // ignore
   }
 }
 
 init().catch(console.error);
 
+/** Helper to upload a Buffer to Vercel Blob */
+async function uploadToBlob(buffer: Buffer, mime: string, filename: string): Promise<string> {
+  const { url } = await put(filename, buffer, {
+    access: "public",
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+    contentType: mime,
+  });
+  return url;
+}
+
+/** Save metadata to Vercel Postgres */
+export async function saveMetadataToPostgres(metadata: MediaMetadata): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS media (
+      id TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      type TEXT NOT NULL,
+      date_taken TIMESTAMP NULL,
+      uploaded_at TIMESTAMP NOT NULL,
+      width INTEGER NULL,
+      height INTEGER NULL
+    );
+  `;
+  await sql`
+    INSERT INTO media (id, url, type, date_taken, uploaded_at, width, height)
+    VALUES (
+      ${metadata.id},
+      ${metadata.url},
+      ${metadata.type},
+      ${metadata.dateTaken ? new Date(metadata.dateTaken) : null},
+      ${new Date(metadata.uploadedAt)},
+      ${metadata.width ?? null},
+      ${metadata.height ?? null}
+    );
+  `;
+}
+
+/** Retrieve all media metadata ordered by date */
+export async function getMediaRegistry(): Promise<MediaMetadata[]> {
+  const rows = await sql`SELECT * FROM media ORDER BY COALESCE(date_taken, uploaded_at) DESC`;
+  return rows.map((row: any) => ({
+    id: row.id,
+    url: row.url,
+    type: row.type as "image" | "video",
+    dateTaken: row.date_taken ? new Date(row.date_taken).toISOString() : null,
+    uploadedAt: new Date(row.uploaded_at).toISOString(),
+    width: row.width ?? undefined,
+    height: row.height ?? undefined,
+  }));
+}
+
+/** Compress image and upload to Blob */
 export async function compressAndSaveImage(buffer: Buffer): Promise<{ url: string; width: number; height: number }> {
   const uniquePrefix = Date.now() + "-" + Math.round(Math.random() * 1e9);
   const filename = `${uniquePrefix}.webp`;
-  const destPath = path.join(UPLOAD_DIR, filename);
-
-  // Compress to WebP with sharp
-  const info = await sharp(buffer)
-    .resize({ width: 1920, withoutEnlargement: true }) // Max width 1920px
+  const { data, info } = await sharp(buffer)
+    .resize({ width: 1920, withoutEnlargement: true })
     .webp({ quality: 80 })
-    .toFile(destPath);
-
-  return {
-    url: `/uploads/${filename}`,
-    width: info.width,
-    height: info.height
-  };
+    .toBuffer({ resolveWithObject: true });
+  const url = await uploadToBlob(data, "image/webp", filename);
+  return { url, width: info.width, height: info.height };
 }
 
+/** Compress video, transcode, and upload to Blob */
 export async function compressAndSaveVideo(buffer: Buffer): Promise<string> {
   const uniquePrefix = Date.now() + "-" + Math.round(Math.random() * 1e9);
   const tempPath = path.join(TMP_DIR, `${uniquePrefix}-temp.mp4`);
-  const filename = `${uniquePrefix}.mp4`;
-  const destPath = path.join(UPLOAD_DIR, filename);
-
-  // Write temporary file because ffmpeg needs a file path
+  const outputPath = path.join(TMP_DIR, `${uniquePrefix}.mp4`);
   await fs.writeFile(tempPath, buffer);
-
-  return new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     ffmpeg(tempPath)
-      // Transcode and compress video heavily for fast web loading and autoplay
       .outputOptions([
-        '-c:v libx264',
-        '-crf 28',         // High compression
-        '-preset veryfast',// Fast encoding
-        '-c:a aac',
-        '-b:a 128k',
-        '-vf scale=-2:720',// Downscale to 720p height, preserving aspect ratio (width divisible by 2)
-        '-movflags +faststart' // Crucial for quick streaming/autoplay on web
+        "-c:v libx264",
+        "-crf 28",
+        "-preset veryfast",
+        "-c:a aac",
+        "-b:a 128k",
+        "-vf scale=-2:720",
+        "-movflags +faststart",
       ])
-      .save(destPath)
-      .on('end', async () => {
-        // Cleanup temp file
+      .save(outputPath)
+      .on("end", async () => {
         try {
-          await fs.unlink(tempPath);
-        } catch(e) {}
-        resolve(`/uploads/${filename}`);
+          const outBuffer = await fs.readFile(outputPath);
+          const filename = `${uniquePrefix}.mp4`;
+          const url = await uploadToBlob(outBuffer, "video/mp4", filename);
+          await fs.unlink(tempPath).catch(() => {});
+          await fs.unlink(outputPath).catch(() => {});
+          resolve(url);
+        } catch (e) {
+          reject(e);
+        }
       })
-      .on('error', async (err) => {
-        try {
-          await fs.unlink(tempPath);
-        } catch(e) {}
+      .on("error", async (err) => {
+        await fs.unlink(tempPath).catch(() => {});
+        await fs.unlink(outputPath).catch(() => {});
         reject(err);
       });
   });
-}
-
-export async function saveMetadata(metadata: MediaMetadata): Promise<void> {
-  try {
-    const data = await fs.readFile(DB_PATH, "utf-8");
-    const existing = JSON.parse(data) as MediaMetadata[];
-    existing.push(metadata);
-    await fs.writeFile(DB_PATH, JSON.stringify(existing, null, 2), "utf-8");
-  } catch (error) {
-    console.error("Failed to save metadata", error);
-  }
-}
-
-export async function getMediaRegistry(): Promise<MediaMetadata[]> {
-  try {
-    const data = await fs.readFile(DB_PATH, "utf-8");
-    const existing = JSON.parse(data) as MediaMetadata[];
-    return existing.sort((a, b) => {
-      const dateA = a.dateTaken ? new Date(a.dateTaken).getTime() : new Date(a.uploadedAt).getTime();
-      const dateB = b.dateTaken ? new Date(b.dateTaken).getTime() : new Date(b.uploadedAt).getTime();
-      return dateB - dateA;
-    });
-  } catch (error) {
-    return [];
-  }
 }

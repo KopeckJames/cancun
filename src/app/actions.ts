@@ -1,6 +1,6 @@
 "use server"
 
-import { compressAndSaveImage, compressAndSaveVideo, saveMetadata, getMediaRegistry, MediaMetadata } from "@/lib/storage";
+import { compressAndSaveImage, compressAndSaveVideo, saveMetadataToPostgres, getMediaRegistry, MediaMetadata } from "@/lib/storage";
 import exifr from "exifr";
 import { revalidatePath } from "next/cache";
 
@@ -55,7 +55,7 @@ export async function uploadMedia(formData: FormData) {
       height
     };
     
-    await saveMetadata(metadata);
+    await saveMetadataToPostgres(metadata);
     revalidatePath("/");
     
     return { success: true, metadata };
