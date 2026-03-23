@@ -60,8 +60,8 @@ export async function saveMetadataToPostgres(metadata: MediaMetadata): Promise<v
       ${metadata.id},
       ${metadata.url},
       ${metadata.type},
-      ${metadata.dateTaken ? new Date(metadata.dateTaken) : null},
-      ${new Date(metadata.uploadedAt)},
+      ${metadata.dateTaken ? metadata.dateTaken : null},
+      ${metadata.uploadedAt},
       ${metadata.width ?? null},
       ${metadata.height ?? null}
     );
