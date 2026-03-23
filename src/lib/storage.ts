@@ -70,7 +70,8 @@ export async function saveMetadataToPostgres(metadata: MediaMetadata): Promise<v
 
 /** Retrieve all media metadata ordered by date */
 export async function getMediaRegistry(): Promise<MediaMetadata[]> {
-  const rows = await sql`SELECT * FROM media ORDER BY COALESCE(date_taken, uploaded_at) DESC`;
+  const result = await sql`SELECT * FROM media ORDER BY COALESCE(date_taken, uploaded_at) DESC`;
+  const rows = result.rows;
   return rows.map((row: any) => ({
     id: row.id,
     url: row.url,
