@@ -128,3 +128,16 @@
     @apply font-sans;
   }
 }
+
+@utility glass {
+  background: var(--background);
+  background-color: color-mix(in oklab, var(--background) 70%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+@utility glass-card {
+  @apply rounded-xl border border-white/10 bg-white/5 backdrop-blur-md shadow-xl dark:bg-black/40 dark:border-white/10;
+}
