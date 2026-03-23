@@ -41,7 +41,14 @@ export async function uploadMedia(formData: FormData) {
       width = res.width;
       height = res.height;
     } else {
-      url = await compressAndSaveVideo(buffer);
+      console.log(`Starting video transcoding for ${file.name} (${arrayBuffer.byteLength} bytes)`);
+      try {
+        url = await compressAndSaveVideo(buffer);
+        console.log(`Successfully transcoded and uploaded video to ${url}`);
+      } catch (err: any) {
+        console.error(`Failed to transcode/upload video ${file.name}:`, err);
+        throw new Error("Video processing failed: " + (err.message || String(err)));
+      }
     }
     
     const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);

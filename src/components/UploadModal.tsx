@@ -25,9 +25,14 @@ export function UploadModal() {
         formData.append("file", file);
         
         try {
-            await uploadMedia(formData);
-        } catch(e) {
-            console.error(e);
+            const result = await uploadMedia(formData);
+            if (!result.success) {
+                console.error("Upload failed for file:", file.name, result.error);
+                alert("Upload failed for " + file.name + ": " + result.error);
+            }
+        } catch(e: any) {
+            console.error("Exception during upload:", e);
+            alert("Exception during upload: " + e.message);
         }
         setUploadProgress({ current: i + 1, total: acceptedFiles.length });
     }
