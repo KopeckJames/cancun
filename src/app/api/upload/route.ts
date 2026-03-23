@@ -12,7 +12,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         // Here you would typically authenticate the user.
         // For now, we'll just allow all uploads.
         return {
-          allowedContentTypes: ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/quicktime", "video/webm"],
+          // Allowing all content types to properly ingest HEIC, HEIF, DNG, RAW, and iOS native formats.
           tokenPayload: JSON.stringify({
             // Any custom metadata you want to pass to onUploadCompleted
           }),

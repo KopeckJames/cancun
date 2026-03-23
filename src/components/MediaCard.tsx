@@ -28,6 +28,7 @@ export function MediaCard({ media, index }: { media: MediaMetadata, index: numbe
           loop
           playsInline
           autoPlay
+          preload="auto"
         />
       ) : (
         <img 

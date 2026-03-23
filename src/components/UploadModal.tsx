@@ -54,7 +54,12 @@ export function UploadModal() {
     onDrop,
     accept: {
       'image/*': [],
-      'video/*': []
+      'video/*': [],
+      'image/heic': ['.heic'],
+      'image/heif': ['.heif'],
+      'image/x-adobe-dng': ['.dng'],
+      'image/tiff': ['.tiff', '.raw'],
+      'video/quicktime': ['.mov']
     }
   });
 
