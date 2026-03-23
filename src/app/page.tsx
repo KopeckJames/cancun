@@ -20,11 +20,9 @@ export default async function Home() {
             ✨ Memories captured in time
           </div>
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tighter">
-            Visual <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/50">Journal</span>
+            Cancun <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/50">2026!</span>
           </h1>
-          <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto font-light">
-            An aesthetic, chronological archive of moments. Upload your visual stories and let them organize themselves beautifully.
-          </p>
+
         </header>
 
         <MasonryGallery items={mediaItems || []} />

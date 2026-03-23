@@ -36,14 +36,8 @@ export function MasonryGallery({ items }: { items: MediaMetadata[] }) {
       <motion.div 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6"
+        className="flex justify-end mb-6"
       >
-        <div>
-          <h2 className="text-4xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60 inline-flex items-center gap-3">
-            Your Memories
-          </h2>
-          <p className="text-muted-foreground mt-2">Chronologically sorted by EXIF metadata.</p>
-        </div>
         <UploadModal />
       </motion.div>
       
