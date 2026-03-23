@@ -4,62 +4,32 @@ import { compressAndSaveImage, compressAndSaveVideo, saveMetadataToPostgres, get
 import exifr from "exifr";
 import { revalidatePath } from "next/cache";
 
-export async function uploadMedia(formData: FormData) {
-  const file = formData.get("file") as File;
-  if (!file) {
-    return { success: false, error: "No file provided" };
-  }
-
-  const isImage = file.type.startsWith("image/");
-  const isVideo = file.type.startsWith("video/");
-  
-  if (!isImage && !isVideo) {
-    return { success: false, error: "Invalid file type. Only images and videos are allowed." };
-  }
-
+export async function saveUploadedMediaRecord(payload: { url: string; type: string; lastModifiedDate?: number }) {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const isImage = payload.type.startsWith("image/");
+    const isVideo = payload.type.startsWith("video/");
     
-    let url = "";
-    let dateTaken: string | null = null;
-    let width: number | undefined;
-    let height: number | undefined;
+    if (!isImage && !isVideo) {
+      return { success: false, error: "Invalid file type. Only images and videos are allowed." };
+    }
 
-    if (isImage) {
-      try {
-        const exifData = await exifr.parse(buffer);
-        if (exifData && exifData.DateTimeOriginal) {
-          dateTaken = new Date(exifData.DateTimeOriginal).toISOString();
-        }
-      } catch (e) {
-        console.warn("Failed to parse EXIF data:", e);
-      }
-      
-      const res = await compressAndSaveImage(buffer);
-      url = res.url;
-      width = res.width;
-      height = res.height;
-    } else {
-      console.log(`Starting video transcoding for ${file.name} (${arrayBuffer.byteLength} bytes)`);
-      try {
-        url = await compressAndSaveVideo(buffer);
-        console.log(`Successfully transcoded and uploaded video to ${url}`);
-      } catch (err: any) {
-        console.error(`Failed to transcode/upload video ${file.name}:`, err);
-        throw new Error("Video processing failed: " + (err.message || String(err)));
-      }
+    const id = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+    
+    let dateTaken: string | null = null;
+    if (payload.lastModifiedDate) {
+      dateTaken = new Date(payload.lastModifiedDate).toISOString();
     }
     
-    const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
     const metadata: MediaMetadata = {
       id,
-      url,
+      url: payload.url,
       type: isImage ? "image" : "video",
       dateTaken,
       uploadedAt: new Date().toISOString(),
-      width,
-      height
+      // We skip width/height for client uploads purely for simplicity, 
+      // they can be inferred via CSS or loaded asynchronously later.
+      width: undefined,
+      height: undefined
     };
     
     await saveMetadataToPostgres(metadata);
@@ -67,7 +37,7 @@ export async function uploadMedia(formData: FormData) {
     
     return { success: true, metadata };
   } catch (err: any) {
-    console.error("Upload error:", err);
+    console.error("Upload save error:", err);
     return { success: false, error: err.message };
   }
 }

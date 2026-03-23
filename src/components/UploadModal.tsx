@@ -5,7 +5,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Button } from "@/components/ui/button";
 import { useDropzone } from "react-dropzone";
 import { UploadCloud, CheckCircle2, Loader2, ImagePlus } from "lucide-react";
-import { uploadMedia } from "@/app/actions";
+import { saveUploadedMediaRecord } from "@/app/actions";
+import { upload } from "@vercel/blob/client";
 import { useRouter } from "next/navigation";
 
 export function UploadModal() {
@@ -21,17 +22,24 @@ export function UploadModal() {
 
     for (let i = 0; i < acceptedFiles.length; i++) {
         const file = acceptedFiles[i];
-        const formData = new FormData();
-        formData.append("file", file);
-        
         try {
-            const result = await uploadMedia(formData);
+            const blob = await upload(file.name, file, {
+              access: 'public',
+              handleUploadUrl: '/api/upload',
+            });
+            
+            const result = await saveUploadedMediaRecord({
+              url: blob.url,
+              type: file.type,
+              lastModifiedDate: file.lastModified
+            });
+            
             if (!result.success) {
-                console.error("Upload failed for file:", file.name, result.error);
-                alert("Upload failed for " + file.name + ": " + result.error);
+                console.error("Database save failed for file:", file.name, result.error);
+                alert("Database save failed for " + file.name + ": " + result.error);
             }
         } catch(e: any) {
-            console.error("Exception during upload:", e);
+            console.error("Exception during upload to Blob:", e);
             alert("Exception during upload: " + e.message);
         }
         setUploadProgress({ current: i + 1, total: acceptedFiles.length });
