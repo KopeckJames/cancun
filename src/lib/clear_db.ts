@@ -1,4 +1,3 @@
-```
 import { getPool } from "@/lib/storage";
 
 (async () => {
@@ -10,4 +9,3 @@ import { getPool } from "@/lib/storage";
     console.error("Error deleting media rows:", e);
   }
 })();
-```
