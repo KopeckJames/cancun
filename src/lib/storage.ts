@@ -4,7 +4,7 @@ import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { put } from "@vercel/blob";
-import { sql } from "@vercel/postgres";
+import { Pool } from "pg";
 
 // Configure ffmpeg path
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
@@ -31,6 +31,18 @@ async function init() {
 
 init().catch(console.error);
 
+// Initialize a global PG pool
+let pool: Pool | null = null;
+export async function getPool() {
+  if (!pool) {
+    pool = new Pool({ connectionString: process.env.POSTGRES_URL });
+    pool.on('error', (err) => {
+      console.error('Unexpected PG pool error', err);
+    });
+  }
+  return pool;
+}
+
 /** Helper to upload a Buffer to Vercel Blob */
 async function uploadToBlob(buffer: Buffer, mime: string, filename: string): Promise<string> {
   const { url } = await put(filename, buffer, {
@@ -43,44 +55,55 @@ async function uploadToBlob(buffer: Buffer, mime: string, filename: string): Pro
 
 /** Save metadata to Vercel Postgres */
 export async function saveMetadataToPostgres(metadata: MediaMetadata): Promise<void> {
-  await sql`
-    CREATE TABLE IF NOT EXISTS media (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      type TEXT NOT NULL,
-      date_taken TIMESTAMP NULL,
-      uploaded_at TIMESTAMP NOT NULL,
-      width INTEGER NULL,
-      height INTEGER NULL
-    );
-  `;
-  await sql`
-    INSERT INTO media (id, url, type, date_taken, uploaded_at, width, height)
-    VALUES (
-      ${metadata.id},
-      ${metadata.url},
-      ${metadata.type},
-      ${metadata.dateTaken ? metadata.dateTaken : null},
-      ${metadata.uploadedAt},
-      ${metadata.width ?? null},
-      ${metadata.height ?? null}
-    );
-  `;
+  try {
+    const client = await getPool();
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS media (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL,
+        type TEXT NOT NULL,
+        date_taken TIMESTAMP NULL,
+        uploaded_at TIMESTAMP NOT NULL,
+        width INTEGER NULL,
+        height INTEGER NULL
+      );
+    `);
+    await client.query(`
+      INSERT INTO media (id, url, type, date_taken, uploaded_at, width, height)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [
+      metadata.id,
+      metadata.url,
+      metadata.type,
+      metadata.dateTaken ? metadata.dateTaken : null,
+      metadata.uploadedAt,
+      metadata.width ?? null,
+      metadata.height ?? null,
+    ]);
+  } catch (e) {
+    console.error('Error saving metadata to Postgres:', e);
+  }
 }
 
 /** Retrieve all media metadata ordered by date */
 export async function getMediaRegistry(): Promise<MediaMetadata[]> {
-  const result = await sql`SELECT * FROM media ORDER BY COALESCE(date_taken, uploaded_at) DESC`;
-  const rows = result.rows;
-  return rows.map((row: any) => ({
-    id: row.id,
-    url: row.url,
-    type: row.type as "image" | "video",
-    dateTaken: row.date_taken ? new Date(row.date_taken).toISOString() : null,
-    uploadedAt: new Date(row.uploaded_at).toISOString(),
-    width: row.width ?? undefined,
-    height: row.height ?? undefined,
-  }));
+  try {
+    const client = await getPool();
+    const result = await client.query(`SELECT * FROM media ORDER BY COALESCE(date_taken, uploaded_at) DESC`);
+    const rows = result.rows;
+    return rows.map((row: any) => ({
+      id: row.id,
+      url: row.url,
+      type: row.type as "image" | "video",
+      dateTaken: row.date_taken ? new Date(row.date_taken).toISOString() : null,
+      uploadedAt: new Date(row.uploaded_at).toISOString(),
+      width: row.width ?? undefined,
+      height: row.height ?? undefined,
+    }));
+  } catch (e) {
+    console.error('Error fetching media registry:', e);
+    return [];
+  }
 }
 
 /** Compress image and upload to Blob */

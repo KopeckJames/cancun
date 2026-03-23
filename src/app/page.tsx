@@ -27,7 +27,7 @@ export default async function Home() {
           </p>
         </header>
 
-        <MasonryGallery items={mediaItems} />
+        <MasonryGallery items={mediaItems || []} />
       </div>
     </main>
   );
