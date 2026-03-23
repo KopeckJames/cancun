@@ -3,7 +3,7 @@ import path from "path";
 import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
-import { put } from "@vercel/blob";
+import { put, del, list } from "@vercel/blob";
 import { Pool } from "pg";
 
 // Configure ffmpeg path
@@ -85,23 +85,84 @@ export async function saveMetadataToPostgres(metadata: MediaMetadata): Promise<v
   }
 }
 
-/** Retrieve all media metadata ordered by date */
-export async function getMediaRegistry(): Promise<MediaMetadata[]> {
+/** Delete a media record and its blob storage file */
+export async function deleteMediaRecord(urlOrId: string): Promise<void> {
   try {
     const client = await getPool();
-    const result = await client.query(`SELECT * FROM media ORDER BY COALESCE(date_taken, uploaded_at) DESC`);
-    const rows = result.rows;
-    return rows.map((row: any) => ({
-      id: row.id,
-      url: row.url,
-      type: row.type as "image" | "video",
-      dateTaken: row.date_taken ? new Date(row.date_taken).toISOString() : null,
-      uploadedAt: new Date(row.uploaded_at).toISOString(),
-      width: row.width ?? undefined,
-      height: row.height ?? undefined,
-    }));
+    // Try to find URL if id was passed
+    const res = await client.query('SELECT url FROM media WHERE id = $1', [urlOrId]);
+    const finalUrl = res.rows.length > 0 ? res.rows[0].url : urlOrId;
+    
+    // Delete from DB just in case
+    await client.query('DELETE FROM media WHERE id = $1 OR url = $1', [urlOrId]);
+    
+    // Delete from Vercel Blob using the URL
+    if (finalUrl.startsWith('https://')) {
+      await del(finalUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+    }
   } catch (e) {
-    console.error('Error fetching media registry:', e);
+    console.error('Error deleting media record:', e);
+    throw e;
+  }
+}
+
+/** Retrieve all media directly from Vercel Blob, skipping DB, to support raw uploads */
+export async function getMediaRegistry(): Promise<MediaMetadata[]> {
+  try {
+    const { blobs } = await list({ token: process.env.BLOB_READ_WRITE_TOKEN, limit: 1000 });
+    
+    const uniqueBlobs = new Map<string, any>();
+    
+    // Deduplicate logic
+    for (const blob of blobs) {
+      if (!blob.pathname) continue;
+      
+      const extMatch = blob.pathname.match(/(\.[^.]+)$/);
+      const ext = extMatch ? extMatch[0] : '';
+      const nameWithoutExt = blob.pathname.slice(0, blob.pathname.length - ext.length);
+      
+      let baseName = nameWithoutExt;
+      const lastDashIdx = nameWithoutExt.lastIndexOf('-');
+      if (lastDashIdx !== -1) {
+        const potentialHash = nameWithoutExt.slice(lastDashIdx + 1);
+        // Usually 22 chars or more for vercel blob, but can be shorter. Just looking for purely alphanumeric/hash-like.
+        if (/^[A-Za-z0-9_]{10,}$/.test(potentialHash)) {
+          baseName = nameWithoutExt.slice(0, lastDashIdx);
+        }
+      }
+      
+      const uniqueKey = (baseName + ext).toLowerCase();
+      
+      // If we already have it, keep the oldest upload (the original)
+      if (uniqueBlobs.has(uniqueKey)) {
+        const existing = uniqueBlobs.get(uniqueKey);
+        if (blob.uploadedAt < existing.uploadedAt) {
+          uniqueBlobs.set(uniqueKey, blob);
+        }
+      } else {
+        uniqueBlobs.set(uniqueKey, blob);
+      }
+    }
+    
+    const dedupedBlobs = Array.from(uniqueBlobs.values());
+    
+    // Sort by uploadedAt descending (newest first)
+    dedupedBlobs.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
+    
+    return dedupedBlobs.map(blob => {
+      const pathnameLower = blob.pathname.toLowerCase();
+      const isVideo = pathnameLower.endsWith('.mp4') || pathnameLower.endsWith('.mov') || pathnameLower.endsWith('.webm') || pathnameLower.endsWith('.quicktime');
+      
+      return {
+        id: blob.url, // Using Blob URL as ID so we can pass it to delete later
+        url: blob.url,
+        type: isVideo ? "video" : "image",
+        dateTaken: null, // Since it's raw from Blob, we fallback to uploadedAt in UI
+        uploadedAt: blob.uploadedAt.toISOString(),
+      };
+    });
+  } catch (e) {
+    console.error('Error fetching from Vercel Blob:', e);
     return [];
   }
 }

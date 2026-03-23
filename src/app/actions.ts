@@ -1,6 +1,6 @@
 "use server"
 
-import { compressAndSaveImage, compressAndSaveVideo, saveMetadataToPostgres, getMediaRegistry, MediaMetadata } from "@/lib/storage";
+import { compressAndSaveImage, compressAndSaveVideo, saveMetadataToPostgres, getMediaRegistry, deleteMediaRecord, MediaMetadata } from "@/lib/storage";
 import exifr from "exifr";
 import { revalidatePath } from "next/cache";
 
@@ -38,6 +38,17 @@ export async function saveUploadedMediaRecord(payload: { url: string; type: stri
     return { success: true, metadata };
   } catch (err: any) {
     console.error("Upload save error:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function deleteMediaAction(id: string) {
+  try {
+    await deleteMediaRecord(id);
+    revalidatePath("/");
+    return { success: true };
+  } catch (err: any) {
+    console.error("Delete media error:", err);
     return { success: false, error: err.message };
   }
 }
